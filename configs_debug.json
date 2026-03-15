@@ -1,9 +1,9 @@
 {
-  "version": "15.6",
-  "timestamp": "2026-03-15T18:55:59.777550",
+  "version": "15.7",
+  "timestamp": "2026-03-15T18:59:50.141521",
   "total_checked": 202,
-  "working_found": 119,
-  "best_selected": 119,
+  "working_found": 120,
+  "best_selected": 120,
   "finnish_count": 4,
-  "avg_latency": 390.9
+  "avg_latency": 417.5
 }
