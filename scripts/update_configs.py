@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v14 — только нормальные страны, без Anycast
+Catwhite Configs Collector v15 — только нормальные страны, без Anycast
+Исправлена обработка URL-кодированных флагов
 """
 
 import requests
@@ -15,9 +16,10 @@ import sys
 from datetime import datetime
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "14"
+VERSION_CORE = "15"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 TIMEOUT = 5
@@ -26,20 +28,14 @@ WORKERS = 20
 # Единственный источник
 MAIN_SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
 
-# Список разрешённых флагов (все, кроме Anycast)
-# Если флаг не в этом списке – конфиг будет отброшен
-ALLOWED_FLAGS = {
-    '🇫🇮', '🇩🇪', '🇳🇱', '🇷🇺', '🇺🇸', '🇬🇧', '🇫🇷', '🇸🇬', '🇸🇪', '🇵🇱',
-    '🇪🇪', '🇪🇸', '🇹🇷', '🇭🇺', '🇮🇹', '🇳🇴', '🇱🇺', '🇨🇿', '🇦🇹', '🇨🇦',
-    '🇯🇵', '🇦🇪', '🇮🇳', '🇧🇷', '🇿🇦', '🇦🇺', '🇪🇺'
-}
-
 # ================= ФУНКЦИИ =================
 
 def log(msg: str):
+    """Вывод сообщения с временной меткой"""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 def get_next_version() -> str:
+    """Читает и увеличивает номер версии"""
     current = 0
     if os.path.exists(VERSION_FILE):
         try:
@@ -53,12 +49,14 @@ def get_next_version() -> str:
     return f"{VERSION_CORE}.{next_ver}"
 
 def extract_config_parts(config_line: str) -> Dict[str, str]:
+    """Разделяет строку на URL и комментарий"""
     if '#' in config_line:
         url, comment = config_line.split('#', 1)
         return {'url': url.strip(), 'comment': '#' + comment.strip()}
     return {'url': config_line.strip(), 'comment': ''}
 
 def extract_host(config_url: str) -> str:
+    """Извлекает хост из URL"""
     m = re.search(r'@([^:]+)', config_url)
     if m:
         return m.group(1)
@@ -68,11 +66,22 @@ def extract_host(config_url: str) -> str:
     return None
 
 def extract_flag_from_comment(comment: str) -> str:
-    m = re.search(r'#([🇦-🇿]{2})', comment)
-    return m.group(1) if m else '🌐'
+    """Извлекает флаг из комментария (поддержка URL-кодировки)"""
+    try:
+        # Декодируем URL-кодировку
+        decoded = unquote(comment)
+        # Ищем эмодзи флага (два символа подряд из диапазона флагов)
+        flag_match = re.search(r'([🇦-🇿]{2})', decoded)
+        if flag_match:
+            return flag_match.group(1)
+    except:
+        pass
+    return '🌐'
 
 def extract_country_from_comment(comment: str) -> str:
+    """Определяет страну по флагу"""
     flag = extract_flag_from_comment(comment)
+    
     country_map = {
         '🇫🇮': 'Финляндия',
         '🇩🇪': 'Германия',
@@ -106,9 +115,15 @@ def extract_country_from_comment(comment: str) -> str:
 
 def is_allowed_flag(flag: str) -> bool:
     """Проверяет, что флаг в списке разрешённых (не Anycast)"""
-    return flag in ALLOWED_FLAGS
+    allowed_flags = {
+        '🇫🇮', '🇩🇪', '🇳🇱', '🇷🇺', '🇺🇸', '🇬🇧', '🇫🇷', '🇸🇬', '🇸🇪', '🇵🇱',
+        '🇪🇪', '🇪🇸', '🇹🇷', '🇭🇺', '🇮🇹', '🇳🇴', '🇱🇺', '🇨🇿', '🇦🇹', '🇨🇦',
+        '🇯🇵', '🇦🇪', '🇮🇳', '🇧🇷', '🇿🇦', '🇦🇺', '🇪🇺'
+    }
+    return flag in allowed_flags
 
 def check_config(config_line: str) -> Dict[str, Any]:
+    """Проверяет работоспособность конфига"""
     parts = extract_config_parts(config_line)
     url = parts['url']
     host = extract_host(url)
@@ -124,12 +139,15 @@ def check_config(config_line: str) -> Dict[str, Any]:
         sock.settimeout(TIMEOUT)
         result = sock.connect_ex((host, port))
         sock.close()
+        
         if result == 0:
             latency = (time.time() - start) * 1000
             flag = extract_flag_from_comment(parts['comment'])
-            # Если флаг не разрешён – возвращаем None (отбрасываем сразу)
+            
+            # Если флаг не разрешён – пропускаем
             if not is_allowed_flag(flag):
                 return None
+                
             return {
                 'full_line': config_line,
                 'url': url,
@@ -146,6 +164,7 @@ def check_config(config_line: str) -> Dict[str, Any]:
     return None
 
 def fetch_configs(source: str) -> List[str]:
+    """Скачивает конфиги из источника"""
     try:
         resp = requests.get(source, timeout=15)
         if resp.status_code == 200:
@@ -155,12 +174,14 @@ def fetch_configs(source: str) -> List[str]:
     return []
 
 def is_valid_config(line: str) -> bool:
+    """Проверяет, что строка является конфигом"""
     line = line.strip()
     if not line or line.startswith('#'):
         return False
     return line.startswith('vless://')
 
 def generate_number(index: int) -> str:
+    """Генерирует трёхзначный номер"""
     return f"{index+1:03d}"
 
 # ================= ОСНОВНАЯ ЛОГИКА =================
@@ -188,6 +209,7 @@ def main():
     log(f"\n🔄 Проверка {len(unique)} конфигов...")
     working = []
     checked = 0
+    
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         future_to_line = {executor.submit(check_config, line): line for line in unique}
         for future in as_completed(future_to_line):
@@ -196,11 +218,12 @@ def main():
             if result:
                 working.append(result)
             if checked % 50 == 0:
-                log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих (уже без Anycast)")
+                log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
 
-    log(f"\n✅ Найдено рабочих (с нормальными флагами): {len(working)}")
+    log(f"\n✅ Найдено рабочих конфигов: {len(working)}")
+    
     if not working:
-        log("❌ Нет рабочих с нормальными флагами, выход")
+        log("❌ Нет рабочих конфигов, выход")
         sys.exit(1)
 
     # Сортируем по скорости
@@ -231,14 +254,18 @@ def main():
 
     for idx, cfg in enumerate(final_list):
         num = generate_number(idx)
+        # Извлекаем sni из комментария
         sni_match = re.search(r'sni\s*=\s*([^|\s]+)', cfg['original_comment'])
         sni = sni_match.group(1) if sni_match else 'unknown'
+        
+        # Формируем строку с сохранением флага
         line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | sni = {sni} | от catler"
         output.append(line)
 
+    # Сохраняем основной файл
     with open('configs.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(output))
-    log(f"✅ configs.txt сохранён, {len(final_list)} конфигов (все с нормальными флагами)")
+    log(f"✅ configs.txt сохранён, {len(final_list)} конфигов")
 
     # Отладочный JSON
     debug = {
@@ -250,8 +277,10 @@ def main():
         'finnish_count': len(finnish),
         'avg_latency': round(sum(c['latency'] for c in best) / len(best), 1) if best else 0,
     }
+    
     with open('configs_debug.json', 'w', encoding='utf-8') as f:
         json.dump(debug, f, indent=2)
+    log(f"📁 configs_debug.json сохранён")
 
     log(f"\n✨ Готово! Средний пинг отобранных: {debug['avg_latency']} ms")
     log("=" * 70)
@@ -260,7 +289,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        log(f"💥 ОШИБКА: {e}")
+        log(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
