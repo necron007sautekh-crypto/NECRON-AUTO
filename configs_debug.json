@@ -1,9 +1,9 @@
 {
-  "version": "12.4",
-  "timestamp": "2026-03-15T18:32:36.058598",
-  "total_checked": 9038,
-  "working_found": 8528,
-  "best_selected": 1000,
+  "version": "13.5",
+  "timestamp": "2026-03-15T18:43:16.371737",
+  "total_checked": 202,
+  "working_found": 176,
+  "best_selected": 176,
   "finnish_count": 0,
-  "avg_latency": 3.3
+  "avg_latency": 323.6
 }
