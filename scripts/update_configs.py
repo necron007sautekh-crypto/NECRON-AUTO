@@ -243,7 +243,7 @@ def main():
     # Генерация файла
     log("\n📝 Формирование configs.txt ...")
     output = [
-        "#profile-title: 🌐🌿CatwhiteVPN🌿🌐",
+        "#profile-title: 👾🌿CatwhiteVPN🌿👾",
         "#profile-update-interval: 1",
         f"#announce: ⚡️Тгк @catlergememe версия: {version}⚡️",
         "#support-url: https://t.me/catlergememe/856",
