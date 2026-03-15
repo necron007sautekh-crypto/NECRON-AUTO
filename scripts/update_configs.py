@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v13 — только один источник, лимит 300, Финляндия вперёд
+Catwhite Configs Collector v14 — только нормальные страны, без Anycast
 """
 
 import requests
@@ -17,16 +17,22 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "13"
+VERSION_CORE = "14"
 VERSION_FILE = "version.txt"
-MAX_CONFIGS = 300                    # ← теперь 300
+MAX_CONFIGS = 300
 TIMEOUT = 5
 WORKERS = 20
 
-# Единственный источник (всё берём отсюда)
+# Единственный источник
 MAIN_SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
 
-# Дополнительные источники убраны – больше не нужны
+# Список разрешённых флагов (все, кроме Anycast)
+# Если флаг не в этом списке – конфиг будет отброшен
+ALLOWED_FLAGS = {
+    '🇫🇮', '🇩🇪', '🇳🇱', '🇷🇺', '🇺🇸', '🇬🇧', '🇫🇷', '🇸🇬', '🇸🇪', '🇵🇱',
+    '🇪🇪', '🇪🇸', '🇹🇷', '🇭🇺', '🇮🇹', '🇳🇴', '🇱🇺', '🇨🇿', '🇦🇹', '🇨🇦',
+    '🇯🇵', '🇦🇪', '🇮🇳', '🇧🇷', '🇿🇦', '🇦🇺', '🇪🇺'
+}
 
 # ================= ФУНКЦИИ =================
 
@@ -95,9 +101,12 @@ def extract_country_from_comment(comment: str) -> str:
         '🇿🇦': 'ЮАР',
         '🇦🇺': 'Австралия',
         '🇪🇺': 'Европа',
-        '🌐': 'Anycast',          # оставляем, но они пойдут в конец
     }
     return country_map.get(flag, 'Anycast')
+
+def is_allowed_flag(flag: str) -> bool:
+    """Проверяет, что флаг в списке разрешённых (не Anycast)"""
+    return flag in ALLOWED_FLAGS
 
 def check_config(config_line: str) -> Dict[str, Any]:
     parts = extract_config_parts(config_line)
@@ -117,11 +126,15 @@ def check_config(config_line: str) -> Dict[str, Any]:
         sock.close()
         if result == 0:
             latency = (time.time() - start) * 1000
+            flag = extract_flag_from_comment(parts['comment'])
+            # Если флаг не разрешён – возвращаем None (отбрасываем сразу)
+            if not is_allowed_flag(flag):
+                return None
             return {
                 'full_line': config_line,
                 'url': url,
                 'original_comment': parts['comment'],
-                'flag': extract_flag_from_comment(parts['comment']),
+                'flag': flag,
                 'country': extract_country_from_comment(parts['comment']),
                 'host': host,
                 'port': port,
@@ -153,11 +166,11 @@ def generate_number(index: int) -> str:
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    log("🚀 Старт сбора конфигов (один источник, макс 300, Финляндия первая)")
+    log("🚀 Старт сбора (только нормальные страны, без Anycast)")
     version = get_next_version()
     log(f"📦 Версия: {version}")
 
-    # Загружаем единственный источник
+    # Загружаем источник
     log(f"\n📡 Загрузка {MAIN_SOURCE[:80]}...")
     lines = fetch_configs(MAIN_SOURCE)
     valid = [line.strip() for line in lines if is_valid_config(line)]
@@ -183,11 +196,11 @@ def main():
             if result:
                 working.append(result)
             if checked % 50 == 0:
-                log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
+                log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих (уже без Anycast)")
 
-    log(f"\n✅ Найдено рабочих: {len(working)}")
+    log(f"\n✅ Найдено рабочих (с нормальными флагами): {len(working)}")
     if not working:
-        log("❌ Нет рабочих, выход")
+        log("❌ Нет рабочих с нормальными флагами, выход")
         sys.exit(1)
 
     # Сортируем по скорости
@@ -202,7 +215,7 @@ def main():
     others = [c for c in best if c['country'] != 'Финляндия']
     others.sort(key=lambda x: (x['country'], x['latency']))
     final_list = finnish + others
-    log(f"   🇫🇮 Финских: {len(finnish)}, 🌍 Других: {len(others)}")
+    log(f"   🇫🇮 Финских: {len(finnish)}, 🌍 Других стран: {len(others)}")
 
     # Генерация файла
     log("\n📝 Формирование configs.txt ...")
@@ -225,7 +238,7 @@ def main():
 
     with open('configs.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(output))
-    log(f"✅ configs.txt сохранён, {len(final_list)} конфигов")
+    log(f"✅ configs.txt сохранён, {len(final_list)} конфигов (все с нормальными флагами)")
 
     # Отладочный JSON
     debug = {
