@@ -3,7 +3,7 @@
 
 """
 Catwhite Configs Collector v12 — Финляндия на первом месте
-Рабочая версия для GitHub Actions
+Рабочая версия для GitHub Actions с подробной отладкой
 """
 
 import requests
@@ -50,11 +50,14 @@ def get_next_version() -> str:
         try:
             with open(VERSION_FILE, 'r') as f:
                 current = int(f.read().strip())
-        except:
-            pass
+        except Exception as e:
+            log(f"⚠️ Ошибка чтения version.txt: {e}")
     next_ver = current + 1
-    with open(VERSION_FILE, 'w') as f:
-        f.write(str(next_ver))
+    try:
+        with open(VERSION_FILE, 'w') as f:
+            f.write(str(next_ver))
+    except Exception as e:
+        log(f"⚠️ Ошибка записи version.txt: {e}")
     return f"{VERSION_CORE}.{next_ver}"
 
 def extract_config_parts(config_line: str) -> Dict[str, str]:
@@ -76,7 +79,6 @@ def extract_host(config_url: str) -> str:
 
 def extract_flag_from_comment(comment: str) -> str:
     """Извлекает эмодзи флага из комментария"""
-    # Ищем # за которым два символа флага (эмодзи)
     m = re.search(r'#([🇦-🇿]{2})', comment)
     if m:
         return m.group(1)
@@ -150,18 +152,22 @@ def check_config(config_line: str) -> Dict[str, Any]:
                 'latency': round(latency, 2),
                 'working': True
             }
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"Ошибка проверки {host}:{port} — {e}")
+        return None
     return None
 
 def fetch_configs(source: str) -> List[str]:
     """Скачивает список строк из источника (с обработкой ошибок)"""
     try:
+        log(f"   Загрузка {source[:60]}...")
         resp = requests.get(source, timeout=15)
         if resp.status_code == 200:
             return resp.text.strip().split('\n')
+        else:
+            log(f"   ⚠️ HTTP {resp.status_code}")
     except Exception as e:
-        log(f"⚠️ Ошибка загрузки {source[:60]}: {str(e)[:50]}")
+        log(f"   ❌ Ошибка: {e}")
     return []
 
 def is_valid_config(line: str) -> bool:
@@ -184,7 +190,7 @@ def main():
     log(f"🎯 Лимит конфигов: {MAX_CONFIGS}")
 
     # ШАГ 1: Загружаем главный источник
-    log(f"\n📡 Загрузка ГЛАВНОГО источника: {MAIN_SOURCE[:80]}...")
+    log(f"\n📡 Загрузка ГЛАВНОГО источника...")
     main_lines = fetch_configs(MAIN_SOURCE)
     main_valid = [line.strip() for line in main_lines if is_valid_config(line)]
     log(f"   ✅ Найдено {len(main_valid)} конфигов в главном")
@@ -192,11 +198,10 @@ def main():
     # ШАГ 2: Загружаем дополнительные источники
     extra_valid = []
     for src in EXTRA_SOURCES:
-        log(f"   {src[:60]}... ", end='')
         lines = fetch_configs(src)
         valid = [line.strip() for line in lines if is_valid_config(line)]
         extra_valid.extend(valid)
-        log(f"✅ +{len(valid)}")
+        log(f"   ✅ +{len(valid)} из {src[:40]}")
 
     # ШАГ 3: Объединяем и убираем дубликаты
     all_configs = main_valid + extra_valid
@@ -218,7 +223,7 @@ def main():
             result = future.result()
             if result:
                 working.append(result)
-            if checked % 100 == 0:
+            if checked % 50 == 0:
                 log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
 
     log(f"\n✅ Найдено рабочих конфигов: {len(working)}")
