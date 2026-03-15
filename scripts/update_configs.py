@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v15 — только нормальные страны, без Anycast
-Исправлена обработка URL-кодированных флагов
+Catwhite Configs Collector v17 — сбор из нескольких источников
 """
 
 import requests
@@ -19,14 +18,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "15"
+VERSION_CORE = "17"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 TIMEOUT = 5
 WORKERS = 20
 
-# Единственный источник
-MAIN_SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
+# ================= СПИСОК ИСТОЧНИКОВ =================
+SOURCES = [
+    # Основной (самый полный)
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
+    # Для мобилок (первые 150)
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
+    # Для мобилок (вторые 150)
+    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
+    # Ещё один источник от AvenCores
+    "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/1.txt",
+]
 
 # ================= ФУНКЦИИ =================
 
@@ -66,7 +74,7 @@ def extract_host(config_url: str) -> str:
     return None
 
 def extract_flag_from_comment(comment: str) -> str:
-    """Извлекает флаг из комментария (поддержка URL-кодировки)"""
+    """Извлекает флаг из комментария (поддержка URL-кодировки и обычных флагов)"""
     try:
         # Декодируем URL-кодировку
         decoded = unquote(comment)
@@ -178,7 +186,10 @@ def is_valid_config(line: str) -> bool:
     line = line.strip()
     if not line or line.startswith('#'):
         return False
-    return line.startswith('vless://')
+    # Пропускаем, если это не vless и не vmess
+    if not (line.startswith('vless://') or line.startswith('vmess://')):
+        return False
+    return True
 
 def generate_number(index: int) -> str:
     """Генерирует трёхзначный номер"""
@@ -187,23 +198,28 @@ def generate_number(index: int) -> str:
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    log("🚀 Старт сбора (только нормальные страны, без Anycast)")
+    log("🚀 Старт сбора из нескольких источников")
     version = get_next_version()
     log(f"📦 Версия: {version}")
 
-    # Загружаем источник
-    log(f"\n📡 Загрузка {MAIN_SOURCE[:80]}...")
-    lines = fetch_configs(MAIN_SOURCE)
-    valid = [line.strip() for line in lines if is_valid_config(line)]
-    log(f"✅ Найдено {len(valid)} конфигов в источнике")
+    # Собираем все конфиги из всех источников
+    all_configs = []
+    log(f"\n📡 Загрузка из {len(SOURCES)} источников:")
+    
+    for src in SOURCES:
+        log(f"  {src[:80]}...")
+        lines = fetch_configs(src)
+        valid = [line.strip() for line in lines if is_valid_config(line)]
+        all_configs.extend(valid)
+        log(f"    ✅ Найдено {len(valid)} конфигов")
 
-    if not valid:
+    if not all_configs:
         log("❌ Нет конфигов, выход")
         sys.exit(1)
 
     # Убираем дубликаты
-    unique = list(set(valid))
-    log(f"📊 Уникальных: {len(unique)}")
+    unique = list(set(all_configs))
+    log(f"\n📊 Уникальных конфигов: {len(unique)}")
 
     # Проверка доступности
     log(f"\n🔄 Проверка {len(unique)} конфигов...")
@@ -254,12 +270,12 @@ def main():
 
     for idx, cfg in enumerate(final_list):
         num = generate_number(idx)
-        # Извлекаем sni из комментария
+        # Извлекаем sni из комментария (если есть)
         sni_match = re.search(r'sni\s*=\s*([^|\s]+)', cfg['original_comment'])
         sni = sni_match.group(1) if sni_match else 'unknown'
         
-        # Формируем строку с сохранением флага
-        line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | sni = {sni} | от catler"
+        # Формируем строку
+        line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | 💠 | от catler"
         output.append(line)
 
     # Сохраняем основной файл
