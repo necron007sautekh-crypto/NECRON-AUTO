@@ -2,12 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v8
-- Проверка доступности
-- Измерение скорости
-- Только рабочие, максимум 1000
-- Сохраняем оригинальные флаги из конфигов
-- Переименовываем только формат
+Catwhite Configs Collector v4
+- Заменяем оригинальный комментарий на новый
+- Без дублирования
+- Сохраняем только нужный формат
 """
 
 import requests
@@ -21,7 +19,7 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "5"
+VERSION_CORE = "4"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 1000
 TIMEOUT = 5
@@ -36,6 +34,22 @@ SOURCES = [
     "https://raw.githubusercontent.com/ts-sf/fly/main/v2ray",
     "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",
 ]
+
+# Ключевые слова для определения страны (на случай если в оригинале нет флага)
+FALLBACK_COUNTRY_KEYWORDS = {
+    '🇷🇺 Россия': ['russia', 'ru', 'moscow', 'spb', 'msk', 'saint-petersburg', 'mosc'],
+    '🇫🇮 Финляндия': ['finland', 'helsinki', 'fi', 'finn'],
+    '🇳🇱 Нидерланды': ['netherlands', 'amsterdam', 'nl', 'neth'],
+    '🇩🇪 Германия': ['germany', 'frankfurt', 'de', 'ger'],
+    '🇫🇷 Франция': ['france', 'paris', 'fra', 'fr'],
+    '🇬🇧 Великобритания': ['uk', 'london', 'gb', 'britain'],
+    '🇺🇸 США': ['usa', 'united states', 'new york', 'us', 'america'],
+    '🇨🇦 Канада': ['canada', 'ca'],
+    '🇸🇬 Сингапур': ['singapore', 'sg'],
+    '🇯🇵 Япония': ['japan', 'jp', 'tokyo'],
+    '🇦🇺 Австралия': ['australia', 'au', 'sydney'],
+    '🇮🇳 Индия': ['india', 'in'],
+}
 
 # ================= ФУНКЦИИ =================
 
@@ -55,23 +69,34 @@ def get_next_version():
     
     return f"{VERSION_CORE}.{next_version}"
 
-def extract_original_flag(config_line: str) -> str:
-    """
-    Извлекает флаг из оригинального конфига
-    Формат: vless://... #🇫🇮 Финляндия 001 | sni = ... | от catler
-    """
-    # Ищем # с флагом (эмодзи)
-    flag_match = re.search(r'#([🇦-🇿]{2})', config_line)
+def extract_flag_from_original(original_line: str) -> str:
+    """Извлекает флаг из оригинального комментария"""
+    # Ищем эмодзи флага (диапазон флагов)
+    flag_match = re.search(r'#([🇦-🇿]{2})', original_line)
     if flag_match:
         return flag_match.group(1)
+    
+    # Если не нашли флаг, пробуем определить по тексту
+    url_lower = original_line.lower()
+    for flag, keywords in FALLBACK_COUNTRY_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in url_lower:
+                return flag.split()[0]  # берём только эмодзи
     return '🌐'
 
-def extract_original_country(config_line: str) -> str:
-    """Извлекает название страны после флага"""
-    # Ищем #🇫🇮 Финляндия
-    country_match = re.search(r'#[🇦-🇿]{2}\s+([^|\d]+)', config_line)
+def extract_country_from_original(original_line: str) -> str:
+    """Извлекает название страны из оригинального комментария"""
+    # Ищем текст после флага до первого разделителя
+    country_match = re.search(r'#[🇦-🇿]{2}\s+([^|\d]+)', original_line)
     if country_match:
         return country_match.group(1).strip()
+    
+    # Если не нашли, пробуем определить по тексту
+    url_lower = original_line.lower()
+    for flag, keywords in FALLBACK_COUNTRY_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in url_lower:
+                return flag.split()[1]  # берём только название
     return 'Anycast'
 
 def extract_sni(config_url: str) -> str:
@@ -82,7 +107,7 @@ def extract_sni(config_url: str) -> str:
     return 'unknown'
 
 def extract_host(config_url: str) -> str:
-    """Извлекает хост из vless:// ссылки"""
+    """Извлекает хост из ссылки"""
     match = re.search(r'@([^:]+)', config_url)
     if match:
         return match.group(1)
@@ -91,13 +116,13 @@ def extract_host(config_url: str) -> str:
         return match.group(1)
     return None
 
-def check_config(config_line: str) -> Dict[str, Any]:
+def check_config(original_line: str) -> Dict[str, Any]:
     """
     Проверяет работоспособность конфига
     Возвращает словарь с результатами или None если не работает
     """
-    # Извлекаем чистую ссылку (до #)
-    clean_url = config_line.split('#')[0].strip()
+    # Берём только часть до # (чистый URL)
+    clean_url = original_line.split('#')[0].strip()
     
     host = extract_host(clean_url)
     if not host:
@@ -108,7 +133,7 @@ def check_config(config_line: str) -> Dict[str, Any]:
         port_match = re.search(r':(\d+)', clean_url)
         port = int(port_match.group(1)) if port_match else 443
         
-        # Пробуем TCP-соединение
+        # Проверяем соединение
         start = time.time()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(TIMEOUT)
@@ -119,13 +144,12 @@ def check_config(config_line: str) -> Dict[str, Any]:
             latency = (time.time() - start) * 1000
             
             return {
-                'original_line': config_line,
                 'clean_url': clean_url,
                 'host': host,
                 'port': port,
                 'latency': round(latency, 2),
-                'flag': extract_original_flag(config_line),
-                'country': extract_original_country(config_line),
+                'flag': extract_flag_from_original(original_line),
+                'country': extract_country_from_original(original_line),
                 'sni': extract_sni(clean_url),
                 'working': True
             }
@@ -150,8 +174,7 @@ def is_valid_config(line: str) -> bool:
     line = line.strip()
     if not line or line.startswith('#'):
         return False
-    # Должен содержать vless:// и #
-    if 'vless://' not in line or '#' not in line:
+    if 'vless://' not in line:
         return False
     return True
 
@@ -163,13 +186,13 @@ def generate_number(index: int) -> str:
 
 def main():
     print("=" * 70)
-    print("🐱 Catwhite Configs Collector v8 — сохраняем оригинальные флаги")
+    print("🐱 Catwhite Configs Collector v9 — без дублирования")
     print("=" * 70)
     
     version = get_next_version()
     print(f"📦 Версия: {version}")
     
-    # ШАГ 1: Собираем все конфиги из источников
+    # Собираем конфиги
     all_lines = []
     print(f"\n📡 Загрузка из {len(SOURCES)} источников:")
     
@@ -186,11 +209,11 @@ def main():
     print(f"\n📊 Уникальных конфигов до проверки: {len(unique_lines)}")
     
     if not unique_lines:
-        print("❌ Нет конфигов! Проверь источники.")
+        print("❌ Нет конфигов!")
         return
     
-    # ШАГ 2: Проверяем работоспособность (параллельно)
-    print(f"\n🔄 Проверка работоспособности (макс {WORKERS} одновременно)...")
+    # Проверяем работоспособность
+    print(f"\n🔄 Проверка работоспособности...")
     
     working_configs = []
     checked = 0
@@ -207,23 +230,23 @@ def main():
             if checked % 100 == 0:
                 print(f"    Проверено {checked}/{len(unique_lines)}, найдено {len(working_configs)} рабочих")
     
-    print(f"\n✅ Найдено рабочих конфигов: {len(working_configs)}")
+    print(f"\n✅ Найдено рабочих: {len(working_configs)}")
     
     if not working_configs:
         print("❌ Нет рабочих конфигов!")
         return
     
-    # ШАГ 3: Сортируем по скорости
+    # Сортируем по скорости
     working_configs.sort(key=lambda x: x['latency'])
     
-    # ШАГ 4: Берём только самые быстрые
+    # Берём самые быстрые
     best_configs = working_configs[:MAX_CONFIGS]
     print(f"📊 Отобрано лучших (до {MAX_CONFIGS}): {len(best_configs)}")
     
-    # ШАГ 5: Сортируем по стране (по оригинальному названию)
-    best_configs.sort(key=lambda x: (x['country'], x['clean_url']))
+    # Сортируем по стране
+    best_configs.sort(key=lambda x: x['country'])
     
-    # ШАГ 6: Генерируем итоговый файл
+    # Генерируем итоговый файл
     output_lines = []
     
     # Шапка
@@ -235,11 +258,11 @@ def main():
     output_lines.append("#hide-settings: 1")
     output_lines.append("")
     
-    # Добавляем конфиги
+    # Добавляем конфиги (полностью заменяем комментарий)
     for idx, cfg in enumerate(best_configs):
         number = generate_number(idx)
-        # Формат: vless://... #🇫🇮 001 Финляндия | sni = ... | от catler
-        line = f"{cfg['clean_url']} #{cfg['flag']} {number} {cfg['country']} | sni = {cfg['sni']} | от catler"
+        # Новый комментарий полностью заменяет старый
+        line = f"{cfg['clean_url']}#{cfg['flag']} {number} {cfg['country']} | sni = {cfg['sni']} | от catler"
         output_lines.append(line)
     
     # Сохраняем
@@ -247,21 +270,8 @@ def main():
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write('\n'.join(output_lines))
     
-    # Сохраняем JSON с информацией
-    json_file = "configs_debug.json"
-    with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'version': version,
-            'timestamp': datetime.now().isoformat(),
-            'total_checked': len(unique_lines),
-            'working_found': len(working_configs),
-            'best_selected': len(best_configs),
-            'avg_latency': sum(c['latency'] for c in best_configs)/len(best_configs) if best_configs else 0,
-        }, f, ensure_ascii=False, indent=2)
-    
     print(f"\n✅ Готово! Сохранено {len(best_configs)} конфигов")
-    print(f"📁 configs.txt — для подписки")
-    print(f"📁 configs_debug.json — отладочная информация")
+    print(f"📁 configs.txt")
     print(f"⚡ Средний пинг: {sum(c['latency'] for c in best_configs)/len(best_configs):.1f}ms")
     print("=" * 70)
 
