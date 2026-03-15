@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v12 — Финляндия на первом месте
-Рабочая версия для GitHub Actions с подробной отладкой
+Catwhite Configs Collector v13 — только один источник, лимит 300, Финляндия вперёд
 """
 
 import requests
@@ -18,57 +17,42 @@ from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "12"
+VERSION_CORE = "13"
 VERSION_FILE = "version.txt"
-MAX_CONFIGS = 1000
-TIMEOUT = 5          # таймаут проверки конфига (сек)
-WORKERS = 20         # кол-во одновременных проверок
+MAX_CONFIGS = 300                    # ← теперь 300
+TIMEOUT = 5
+WORKERS = 20
 
-# ГЛАВНЫЙ источник (лучшие конфиги)
+# Единственный источник (всё берём отсюда)
 MAIN_SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
 
-# Дополнительные источники (если не хватит)
-EXTRA_SOURCES = [
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
-    "https://raw.githubusercontent.com/4n0nymou3/multi-proxy-config-fetcher/refs/heads/main/configs/proxy_configs.txt",
-    "https://raw.githubusercontent.com/nikita29a/FreeProxyList/refs/heads/main/mirror/1.txt",
-    "https://raw.githubusercontent.com/whoahaow/rjsxrd/refs/heads/main/githubmirror/bypass/bypass-all.txt",
-    "https://raw.githubusercontent.com/ts-sf/fly/main/v2ray",
-    "https://raw.githubusercontent.com/mheidari98/.proxy/main/all",
-]
+# Дополнительные источники убраны – больше не нужны
 
 # ================= ФУНКЦИИ =================
 
 def log(msg: str):
-    """Простой лог с временем"""
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 def get_next_version() -> str:
-    """Читает текущую версию из файла и увеличивает её"""
     current = 0
     if os.path.exists(VERSION_FILE):
         try:
             with open(VERSION_FILE, 'r') as f:
                 current = int(f.read().strip())
-        except Exception as e:
-            log(f"⚠️ Ошибка чтения version.txt: {e}")
+        except:
+            pass
     next_ver = current + 1
-    try:
-        with open(VERSION_FILE, 'w') as f:
-            f.write(str(next_ver))
-    except Exception as e:
-        log(f"⚠️ Ошибка записи version.txt: {e}")
+    with open(VERSION_FILE, 'w') as f:
+        f.write(str(next_ver))
     return f"{VERSION_CORE}.{next_ver}"
 
 def extract_config_parts(config_line: str) -> Dict[str, str]:
-    """Разделяет строку на URL и комментарий"""
     if '#' in config_line:
         url, comment = config_line.split('#', 1)
         return {'url': url.strip(), 'comment': '#' + comment.strip()}
     return {'url': config_line.strip(), 'comment': ''}
 
 def extract_host(config_url: str) -> str:
-    """Извлекает хост из URL (часть после @ или IP)"""
     m = re.search(r'@([^:]+)', config_url)
     if m:
         return m.group(1)
@@ -78,14 +62,10 @@ def extract_host(config_url: str) -> str:
     return None
 
 def extract_flag_from_comment(comment: str) -> str:
-    """Извлекает эмодзи флага из комментария"""
     m = re.search(r'#([🇦-🇿]{2})', comment)
-    if m:
-        return m.group(1)
-    return '🌐'
+    return m.group(1) if m else '🌐'
 
 def extract_country_from_comment(comment: str) -> str:
-    """Определяет страну по эмодзи флага"""
     flag = extract_flag_from_comment(comment)
     country_map = {
         '🇫🇮': 'Финляндия',
@@ -115,21 +95,17 @@ def extract_country_from_comment(comment: str) -> str:
         '🇿🇦': 'ЮАР',
         '🇦🇺': 'Австралия',
         '🇪🇺': 'Европа',
+        '🌐': 'Anycast',          # оставляем, но они пойдут в конец
     }
     return country_map.get(flag, 'Anycast')
 
 def check_config(config_line: str) -> Dict[str, Any]:
-    """
-    Проверяет доступность конфига (TCP-подключение к хосту:порт)
-    Возвращает словарь с данными или None, если не работает.
-    """
     parts = extract_config_parts(config_line)
     url = parts['url']
     host = extract_host(url)
     if not host:
         return None
 
-    # Определяем порт
     port_match = re.search(r':(\d+)', url)
     port = int(port_match.group(1)) if port_match else 443
 
@@ -152,68 +128,51 @@ def check_config(config_line: str) -> Dict[str, Any]:
                 'latency': round(latency, 2),
                 'working': True
             }
-    except Exception as e:
-        log(f"Ошибка проверки {host}:{port} — {e}")
+    except:
         return None
     return None
 
 def fetch_configs(source: str) -> List[str]:
-    """Скачивает список строк из источника (с обработкой ошибок)"""
     try:
-        log(f"   Загрузка {source[:60]}...")
         resp = requests.get(source, timeout=15)
         if resp.status_code == 200:
             return resp.text.strip().split('\n')
-        else:
-            log(f"   ⚠️ HTTP {resp.status_code}")
-    except Exception as e:
-        log(f"   ❌ Ошибка: {e}")
+    except:
+        pass
     return []
 
 def is_valid_config(line: str) -> bool:
-    """Фильтр – оставляем только строки, начинающиеся с vless://"""
     line = line.strip()
     if not line or line.startswith('#'):
         return False
     return line.startswith('vless://')
 
 def generate_number(index: int) -> str:
-    """Трёхзначный номер с ведущими нулями"""
     return f"{index+1:03d}"
 
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    log("🚀 Старт сбора конфигов")
+    log("🚀 Старт сбора конфигов (один источник, макс 300, Финляндия первая)")
     version = get_next_version()
     log(f"📦 Версия: {version}")
-    log(f"🎯 Лимит конфигов: {MAX_CONFIGS}")
 
-    # ШАГ 1: Загружаем главный источник
-    log(f"\n📡 Загрузка ГЛАВНОГО источника...")
-    main_lines = fetch_configs(MAIN_SOURCE)
-    main_valid = [line.strip() for line in main_lines if is_valid_config(line)]
-    log(f"   ✅ Найдено {len(main_valid)} конфигов в главном")
+    # Загружаем единственный источник
+    log(f"\n📡 Загрузка {MAIN_SOURCE[:80]}...")
+    lines = fetch_configs(MAIN_SOURCE)
+    valid = [line.strip() for line in lines if is_valid_config(line)]
+    log(f"✅ Найдено {len(valid)} конфигов в источнике")
 
-    # ШАГ 2: Загружаем дополнительные источники
-    extra_valid = []
-    for src in EXTRA_SOURCES:
-        lines = fetch_configs(src)
-        valid = [line.strip() for line in lines if is_valid_config(line)]
-        extra_valid.extend(valid)
-        log(f"   ✅ +{len(valid)} из {src[:40]}")
-
-    # ШАГ 3: Объединяем и убираем дубликаты
-    all_configs = main_valid + extra_valid
-    unique = list(set(all_configs))
-    log(f"\n📊 Уникальных конфигов: {len(unique)}")
-
-    if not unique:
-        log("❌ Нет ни одного конфига. Проверь источники.")
+    if not valid:
+        log("❌ Нет конфигов, выход")
         sys.exit(1)
 
-    # ШАГ 4: Проверка доступности (многопоточно)
-    log(f"\n🔄 Проверка доступности (макс {WORKERS} потоков)...")
+    # Убираем дубликаты
+    unique = list(set(valid))
+    log(f"📊 Уникальных: {len(unique)}")
+
+    # Проверка доступности
+    log(f"\n🔄 Проверка {len(unique)} конфигов...")
     working = []
     checked = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
@@ -226,26 +185,26 @@ def main():
             if checked % 50 == 0:
                 log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
 
-    log(f"\n✅ Найдено рабочих конфигов: {len(working)}")
+    log(f"\n✅ Найдено рабочих: {len(working)}")
     if not working:
-        log("❌ Нет рабочих конфигов. Выход.")
+        log("❌ Нет рабочих, выход")
         sys.exit(1)
 
-    # ШАГ 5: Сортируем по скорости
+    # Сортируем по скорости
     working.sort(key=lambda x: x['latency'])
 
-    # ШАГ 6: Оставляем только самые быстрые (не больше MAX_CONFIGS)
+    # Берём только 300 самых быстрых
     best = working[:MAX_CONFIGS]
     log(f"📊 Отобрано лучших (до {MAX_CONFIGS}): {len(best)}")
 
-    # ШАГ 7: Сортировка с приоритетом Финляндии
+    # Сортировка с приоритетом Финляндии
     finnish = [c for c in best if c['country'] == 'Финляндия']
     others = [c for c in best if c['country'] != 'Финляндия']
     others.sort(key=lambda x: (x['country'], x['latency']))
     final_list = finnish + others
     log(f"   🇫🇮 Финских: {len(finnish)}, 🌍 Других: {len(others)}")
 
-    # ШАГ 8: Генерация итогового файла
+    # Генерация файла
     log("\n📝 Формирование configs.txt ...")
     output = [
         "#profile-title: 🌐🌿CatwhiteVPN🌿🌐",
@@ -259,18 +218,16 @@ def main():
 
     for idx, cfg in enumerate(final_list):
         num = generate_number(idx)
-        # пытаемся извлечь sni из оригинального комментария
         sni_match = re.search(r'sni\s*=\s*([^|\s]+)', cfg['original_comment'])
         sni = sni_match.group(1) if sni_match else 'unknown'
         line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | sni = {sni} | от catler"
         output.append(line)
 
-    # Сохраняем основной файл
     with open('configs.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(output))
-    log(f"✅ configs.txt сохранён, строк: {len(output)-7}")
+    log(f"✅ configs.txt сохранён, {len(final_list)} конфигов")
 
-    # ШАГ 9: Сохраняем отладочный JSON
+    # Отладочный JSON
     debug = {
         'version': version,
         'timestamp': datetime.now().isoformat(),
@@ -282,7 +239,6 @@ def main():
     }
     with open('configs_debug.json', 'w', encoding='utf-8') as f:
         json.dump(debug, f, indent=2)
-    log(f"📁 configs_debug.json сохранён")
 
     log(f"\n✨ Готово! Средний пинг отобранных: {debug['avg_latency']} ms")
     log("=" * 70)
@@ -291,7 +247,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        log(f"💥 КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        log(f"💥 ОШИБКА: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
