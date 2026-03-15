@@ -2,11 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v19 — финальная версия
-- Финляндия: максимум 30 самых быстрых
-- Другие страны: максимум 30 на страну
-- Общий лимит: 300 конфигов
-- Приоритет: сначала финские, потом остальные по алфавиту
+Catwhite Configs Collector v20 — реальная проверка через TLS
 """
 
 import requests
@@ -16,29 +12,26 @@ import os
 import re
 import socket
 import sys
+import ssl
 from datetime import datetime
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "19"
+VERSION_CORE = "20"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 MAX_PER_COUNTRY = 30
-MAX_FINNISH = 30  # максимум финских конфигов
-TIMEOUT = 5
-WORKERS = 20
+MAX_FINNISH = 30
+TIMEOUT = 10  # Увеличил до 10 секунд для TLS-рукопожатия
+WORKERS = 10  # Уменьшил, чтобы не перегружать сеть
 
 # ================= СПИСОК ИСТОЧНИКОВ =================
 SOURCES = [
-    # Основной (самый полный)
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
-    # Для мобилок (первые 150)
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
-    # Для мобилок (вторые 150)
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
-    # Ещё один источник от AvenCores
     "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/1.txt",
 ]
 
@@ -137,7 +130,7 @@ def is_allowed_flag(flag: str) -> bool:
     return flag in allowed_flags
 
 def check_config(config_line: str) -> Dict[str, Any]:
-    """Проверяет работоспособность конфига"""
+    """Реальная проверка работоспособности конфига через TLS-рукопожатие"""
     parts = extract_config_parts(config_line)
     url = parts['url']
     host = extract_host(url)
@@ -146,22 +139,56 @@ def check_config(config_line: str) -> Dict[str, Any]:
 
     port_match = re.search(r':(\d+)', url)
     port = int(port_match.group(1)) if port_match else 443
+    
+    sni_match = re.search(r'sni=([^&]+)', url)
+    sni = sni_match.group(1) if sni_match else host
 
     try:
         start = time.time()
+        
+        # Создаём сокет
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(TIMEOUT)
-        result = sock.connect_ex((host, port))
-        sock.close()
         
-        if result == 0:
+        # Подключаемся к хосту
+        sock.connect((host, port))
+        
+        # Оборачиваем в SSL
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
+        ssl_sock = context.wrap_socket(sock, server_hostname=sni)
+        
+        # Если дошли до сюда — соединение установлено
+        latency = (time.time() - start) * 1000
+        ssl_sock.close()
+        
+        flag = extract_flag_from_comment(parts['comment'])
+        
+        # Если флаг не разрешён – пропускаем
+        if not is_allowed_flag(flag):
+            return None
+            
+        return {
+            'full_line': config_line,
+            'url': url,
+            'original_comment': parts['comment'],
+            'flag': flag,
+            'country': extract_country_from_comment(parts['comment']),
+            'host': host,
+            'port': port,
+            'latency': round(latency, 2),
+            'working': True
+        }
+    except ssl.SSLError as e:
+        # Для REALITY серверов может быть ошибка WRONG_VERSION_NUMBER
+        # Это нормально и означает, что сервер жив!
+        if 'WRONG_VERSION_NUMBER' in str(e):
             latency = (time.time() - start) * 1000
             flag = extract_flag_from_comment(parts['comment'])
-            
-            # Если флаг не разрешён – пропускаем
             if not is_allowed_flag(flag):
                 return None
-                
             return {
                 'full_line': config_line,
                 'url': url,
@@ -173,7 +200,8 @@ def check_config(config_line: str) -> Dict[str, Any]:
                 'latency': round(latency, 2),
                 'working': True
             }
-    except:
+    except Exception as e:
+        # Любая другая ошибка — конфиг мёртв
         return None
     return None
 
@@ -239,7 +267,7 @@ def main():
             result = future.result()
             if result:
                 working.append(result)
-            if checked % 50 == 0:
+            if checked % 20 == 0:
                 log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
 
     log(f"\n✅ Найдено рабочих конфигов: {len(working)}")
