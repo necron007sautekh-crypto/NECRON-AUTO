@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v18 — приоритет Финляндии и лимит 30 на страну
+Catwhite Configs Collector v19 — финальная версия
+- Финляндия: максимум 30 самых быстрых
+- Другие страны: максимум 30 на страну
+- Общий лимит: 300 конфигов
+- Приоритет: сначала финские, потом остальные по алфавиту
 """
 
 import requests
@@ -18,10 +22,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "18"
+VERSION_CORE = "19"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
-MAX_PER_COUNTRY = 30  # максимум конфигов на одну страну (кроме Финляндии)
+MAX_PER_COUNTRY = 30
+MAX_FINNISH = 30  # максимум финских конфигов
 TIMEOUT = 5
 WORKERS = 20
 
@@ -246,11 +251,12 @@ def main():
     # Сортируем все рабочие по скорости
     working.sort(key=lambda x: x['latency'])
 
-    # Отбираем финские первыми (все, сколько есть)
-    finnish = [c for c in working if c['country'] == 'Финляндия']
+    # Отбираем финские (максимум 30 самых быстрых)
+    finnish_all = [c for c in working if c['country'] == 'Финляндия']
+    finnish = finnish_all[:MAX_FINNISH]
     remaining = [c for c in working if c['country'] != 'Финляндия']
     
-    log(f"\n🇫🇮 Найдено финских: {len(finnish)}")
+    log(f"\n🇫🇮 Найдено финских: {len(finnish_all)}, отобрано: {len(finnish)}")
     
     # Группируем остальные по странам
     countries = {}
@@ -263,7 +269,6 @@ def main():
     # Для каждой страны оставляем не больше MAX_PER_COUNTRY самых быстрых
     selected_others = []
     for country, cfgs in countries.items():
-        # Берём первые MAX_PER_COUNTRY (они уже отсортированы по скорости)
         selected = cfgs[:MAX_PER_COUNTRY]
         selected_others.extend(selected)
         log(f"   {country}: выбрано {len(selected)} из {len(cfgs)}")
@@ -271,12 +276,11 @@ def main():
     # Сортируем остальные по стране и скорости
     selected_others.sort(key=lambda x: (x['country'], x['latency']))
     
-    # Финальный список: сначала все финские, потом остальные
+    # Финальный список: сначала финские (до 30), потом остальные
     final_list = finnish + selected_others
     
-    # Если получилось больше MAX_CONFIGS, обрезаем (но финские останутся)
+    # Если получилось больше MAX_CONFIGS, обрезаем остальные, но финские не трогаем
     if len(final_list) > MAX_CONFIGS:
-        # Оставляем все финские + первые (MAX_CONFIGS - len(finnish)) из остальных
         final_list = finnish + selected_others[:MAX_CONFIGS - len(finnish)]
     
     log(f"\n📊 Итоговое количество: {len(final_list)} конфигов")
@@ -297,11 +301,8 @@ def main():
 
     for idx, cfg in enumerate(final_list):
         num = generate_number(idx)
-        # Извлекаем sni из комментария (если есть)
-        sni_match = re.search(r'sni\s*=\s*([^|\s]+)', cfg['original_comment'])
-        sni = sni_match.group(1) if sni_match else 'unknown'
         
-        # Формируем строку
+        # Формируем строку с 💠 вместо sni
         line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | 💠 | от catler"
         output.append(line)
 
@@ -318,6 +319,7 @@ def main():
         'working_found': len(working),
         'best_selected': len(final_list),
         'finnish_count': len(finnish),
+        'finnish_total': len(finnish_all),
         'per_country': {c: len([x for x in final_list if x['country'] == c]) for c in set(x['country'] for x in final_list)},
         'avg_latency': round(sum(c['latency'] for c in final_list) / len(final_list), 1) if final_list else 0,
     }
