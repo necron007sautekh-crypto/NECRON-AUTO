@@ -2,7 +2,7 @@ name: Update Catwhite Configs
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # каждые 2 часа
+    - cron: '0 */5 * * *'  # каждые 5 часов
   workflow_dispatch:
 
 permissions:
@@ -32,6 +32,6 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add configs.txt configs_debug.json version.txt
+          git add configs.json version.txt debug.json
           git diff --quiet && git diff --staged --quiet || git commit -m "🔄 Auto update to version $(cat version.txt)"
           git push
