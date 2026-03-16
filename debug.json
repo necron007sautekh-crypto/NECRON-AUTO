@@ -1,0 +1,10 @@
+{
+  "version": "24.6",
+  "timestamp": "2026-03-16T12:05:44.753957",
+  "source": "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
+  "total_original": 168,
+  "processed": 168,
+  "finnish_count": 7,
+  "other_count": 126,
+  "anycast_count": 35
+}
