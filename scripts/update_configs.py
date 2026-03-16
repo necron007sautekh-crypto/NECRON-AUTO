@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v22 — финальная версия
-- Финские из igareck: без проверки (все)
+Catwhite Configs Collector v22.1 — финальная версия
+- Финские из igareck: без проверки (все), первые в списке
 - Остальные: проверяем
+- Нумерация сквозная
 - Лимит: 300 всего
 """
 
@@ -22,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "22"
+VERSION_CORE = "22.1"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 MAX_PER_COUNTRY = 30
@@ -36,9 +37,6 @@ SOURCES = [
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
     "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/1.txt",
 ]
-
-# Финские будем брать только из этих источников (igareck)
-FINNISH_SOURCES = SOURCES[:3]  # первые три — от igareck
 
 # ================= ФУНКЦИИ =================
 
@@ -272,7 +270,7 @@ def main():
                 'country': 'Финляндия',
                 'host': extract_host(parts['url']) or 'unknown',
                 'port': 443,
-                'latency': 999,  # высокий пинг, но они всё равно будут первыми
+                'latency': 999,
                 'working': True
             })
     
@@ -324,10 +322,10 @@ def main():
         final_list = finnish_working + selected_others[:MAX_CONFIGS - len(finnish_working)]
     
     log(f"\n📊 Итого: {len(final_list)} конфигов")
-    log(f"   🇫🇮 Финских: {len(finnish_working)}")
+    log(f"   🇫🇮 Финских: {len(finnish_working)} (первые в списке)")
     log(f"   🌍 Других: {len(final_list) - len(finnish_working)}")
 
-    # Генерация файла
+    # Генерация файла со сквозной нумерацией
     log("\n📝 Генерация configs.txt ...")
     output = [
         "#profile-title: 👾🌿CatwhiteVPN🌿👾",
@@ -346,8 +344,9 @@ def main():
 
     with open('configs.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(output))
-    log(f"✅ configs.txt сохранён")
+    log(f"✅ configs.txt сохранён, строк: {len(output)}")
 
+    # Отладочная инфа
     debug = {
         'version': version,
         'timestamp': datetime.now().isoformat(),
