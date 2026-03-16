@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v20 — реальная проверка через TLS
+Catwhite Configs Collector v21 — улучшенная проверка
 """
 
 import requests
@@ -19,13 +19,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "20"
+VERSION_CORE = "21"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 MAX_PER_COUNTRY = 30
 MAX_FINNISH = 30
-TIMEOUT = 10  # Увеличил до 10 секунд для TLS-рукопожатия
-WORKERS = 10  # Уменьшил, чтобы не перегружать сеть
+TIMEOUT = 15  # Увеличил до 15 секунд
+WORKERS = 8   # Ещё уменьшил, чтобы не перегружать
 
 # ================= СПИСОК ИСТОЧНИКОВ =================
 SOURCES = [
@@ -62,22 +62,102 @@ def extract_config_parts(config_line: str) -> Dict[str, str]:
         return {'url': url.strip(), 'comment': '#' + comment.strip()}
     return {'url': config_line.strip(), 'comment': ''}
 
-def extract_host(config_url: str) -> str:
-    """Извлекает хост из URL"""
-    m = re.search(r'@([^:]+)', config_url)
-    if m:
-        return m.group(1)
-    m = re.search(r'(\d+\.\d+\.\d+\.\d+)', config_url)
-    if m:
-        return m.group(1)
+def resolve_host(hostname: str, family=socket.AF_INET) -> str:
+    """Резолвит хост в IP, пробует IPv4, если не получается — IPv6"""
+    try:
+        return socket.gethostbyname(hostname)
+    except:
+        try:
+            addrs = socket.getaddrinfo(hostname, None, socket.AF_INET6)
+            if addrs:
+                return addrs[0][4][0]
+        except:
+            pass
+    return None
+
+def check_config(config_line: str) -> Dict[str, Any]:
+    """Реальная проверка работоспособности конфига с повторными попытками"""
+    parts = extract_config_parts(config_line)
+    url = parts['url']
+    hostname = extract_host(url)
+    if not hostname:
+        return None
+
+    port_match = re.search(r':(\d+)', url)
+    port = int(port_match.group(1)) if port_match else 443
+    
+    sni_match = re.search(r'sni=([^&]+)', url)
+    sni = sni_match.group(1) if sni_match else hostname
+
+    # Пробуем до 2 раз
+    for attempt in range(2):
+        try:
+            start = time.time()
+            
+            # Резолвим хост
+            host = resolve_host(hostname)
+            if not host:
+                time.sleep(1)
+                continue
+            
+            # Создаём сокет
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(TIMEOUT)
+            sock.connect((host, port))
+            
+            # SSL контекст
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            
+            ssl_sock = context.wrap_socket(sock, server_hostname=sni)
+            latency = (time.time() - start) * 1000
+            ssl_sock.close()
+            
+            flag = extract_flag_from_comment(parts['comment'])
+            if not is_allowed_flag(flag):
+                return None
+                
+            return {
+                'full_line': config_line,
+                'url': url,
+                'original_comment': parts['comment'],
+                'flag': flag,
+                'country': extract_country_from_comment(parts['comment']),
+                'host': host,
+                'port': port,
+                'latency': round(latency, 2),
+                'working': True
+            }
+            
+        except ssl.SSLError as e:
+            if 'WRONG_VERSION_NUMBER' in str(e):
+                # Для REALITY это нормально
+                latency = (time.time() - start) * 1000
+                flag = extract_flag_from_comment(parts['comment'])
+                if not is_allowed_flag(flag):
+                    return None
+                return {
+                    'full_line': config_line,
+                    'url': url,
+                    'original_comment': parts['comment'],
+                    'flag': flag,
+                    'country': extract_country_from_comment(parts['comment']),
+                    'host': host,
+                    'port': port,
+                    'latency': round(latency, 2),
+                    'working': True
+                }
+        except Exception as e:
+            time.sleep(1)  # Пауза перед повтором
+            continue
+            
     return None
 
 def extract_flag_from_comment(comment: str) -> str:
     """Извлекает флаг из комментария (поддержка URL-кодировки и обычных флагов)"""
     try:
-        # Декодируем URL-кодировку
         decoded = unquote(comment)
-        # Ищем эмодзи флага (два символа подряд из диапазона флагов)
         flag_match = re.search(r'([🇦-🇿]{2})', decoded)
         if flag_match:
             return flag_match.group(1)
@@ -129,82 +209,6 @@ def is_allowed_flag(flag: str) -> bool:
     }
     return flag in allowed_flags
 
-def check_config(config_line: str) -> Dict[str, Any]:
-    """Реальная проверка работоспособности конфига через TLS-рукопожатие"""
-    parts = extract_config_parts(config_line)
-    url = parts['url']
-    host = extract_host(url)
-    if not host:
-        return None
-
-    port_match = re.search(r':(\d+)', url)
-    port = int(port_match.group(1)) if port_match else 443
-    
-    sni_match = re.search(r'sni=([^&]+)', url)
-    sni = sni_match.group(1) if sni_match else host
-
-    try:
-        start = time.time()
-        
-        # Создаём сокет
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(TIMEOUT)
-        
-        # Подключаемся к хосту
-        sock.connect((host, port))
-        
-        # Оборачиваем в SSL
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-        
-        ssl_sock = context.wrap_socket(sock, server_hostname=sni)
-        
-        # Если дошли до сюда — соединение установлено
-        latency = (time.time() - start) * 1000
-        ssl_sock.close()
-        
-        flag = extract_flag_from_comment(parts['comment'])
-        
-        # Если флаг не разрешён – пропускаем
-        if not is_allowed_flag(flag):
-            return None
-            
-        return {
-            'full_line': config_line,
-            'url': url,
-            'original_comment': parts['comment'],
-            'flag': flag,
-            'country': extract_country_from_comment(parts['comment']),
-            'host': host,
-            'port': port,
-            'latency': round(latency, 2),
-            'working': True
-        }
-    except ssl.SSLError as e:
-        # Для REALITY серверов может быть ошибка WRONG_VERSION_NUMBER
-        # Это нормально и означает, что сервер жив!
-        if 'WRONG_VERSION_NUMBER' in str(e):
-            latency = (time.time() - start) * 1000
-            flag = extract_flag_from_comment(parts['comment'])
-            if not is_allowed_flag(flag):
-                return None
-            return {
-                'full_line': config_line,
-                'url': url,
-                'original_comment': parts['comment'],
-                'flag': flag,
-                'country': extract_country_from_comment(parts['comment']),
-                'host': host,
-                'port': port,
-                'latency': round(latency, 2),
-                'working': True
-            }
-    except Exception as e:
-        # Любая другая ошибка — конфиг мёртв
-        return None
-    return None
-
 def fetch_configs(source: str) -> List[str]:
     """Скачивает конфиги из источника"""
     try:
@@ -220,7 +224,6 @@ def is_valid_config(line: str) -> bool:
     line = line.strip()
     if not line or line.startswith('#'):
         return False
-    # Пропускаем, если это не vless и не vmess
     if not (line.startswith('vless://') or line.startswith('vmess://')):
         return False
     return True
@@ -236,7 +239,6 @@ def main():
     version = get_next_version()
     log(f"📦 Версия: {version}")
 
-    # Собираем все конфиги из всех источников
     all_configs = []
     log(f"\n📡 Загрузка из {len(SOURCES)} источников:")
     
@@ -251,11 +253,9 @@ def main():
         log("❌ Нет конфигов, выход")
         sys.exit(1)
 
-    # Убираем дубликаты
     unique = list(set(all_configs))
     log(f"\n📊 Уникальных конфигов: {len(unique)}")
 
-    # Проверка доступности
     log(f"\n🔄 Проверка {len(unique)} конфигов...")
     working = []
     checked = 0
@@ -276,17 +276,14 @@ def main():
         log("❌ Нет рабочих конфигов, выход")
         sys.exit(1)
 
-    # Сортируем все рабочие по скорости
     working.sort(key=lambda x: x['latency'])
 
-    # Отбираем финские (максимум 30 самых быстрых)
     finnish_all = [c for c in working if c['country'] == 'Финляндия']
     finnish = finnish_all[:MAX_FINNISH]
     remaining = [c for c in working if c['country'] != 'Финляндия']
     
     log(f"\n🇫🇮 Найдено финских: {len(finnish_all)}, отобрано: {len(finnish)}")
     
-    # Группируем остальные по странам
     countries = {}
     for cfg in remaining:
         country = cfg['country']
@@ -294,20 +291,16 @@ def main():
             countries[country] = []
         countries[country].append(cfg)
     
-    # Для каждой страны оставляем не больше MAX_PER_COUNTRY самых быстрых
     selected_others = []
     for country, cfgs in countries.items():
         selected = cfgs[:MAX_PER_COUNTRY]
         selected_others.extend(selected)
         log(f"   {country}: выбрано {len(selected)} из {len(cfgs)}")
     
-    # Сортируем остальные по стране и скорости
     selected_others.sort(key=lambda x: (x['country'], x['latency']))
     
-    # Финальный список: сначала финские (до 30), потом остальные
     final_list = finnish + selected_others
     
-    # Если получилось больше MAX_CONFIGS, обрезаем остальные, но финские не трогаем
     if len(final_list) > MAX_CONFIGS:
         final_list = finnish + selected_others[:MAX_CONFIGS - len(finnish)]
     
@@ -315,7 +308,6 @@ def main():
     log(f"   🇫🇮 Финских: {len(finnish)}")
     log(f"   🌍 Других стран: {len(final_list) - len(finnish)}")
 
-    # Генерация файла
     log("\n📝 Формирование configs.txt ...")
     output = [
         "#profile-title: 👾🌿CatwhiteVPN🌿👾",
@@ -329,17 +321,13 @@ def main():
 
     for idx, cfg in enumerate(final_list):
         num = generate_number(idx)
-        
-        # Формируем строку с 💠 вместо sni
         line = f"{cfg['url']}#{cfg['flag']} {num} {cfg['country']} | 💠 | от catler"
         output.append(line)
 
-    # Сохраняем основной файл
     with open('configs.txt', 'w', encoding='utf-8') as f:
         f.write('\n'.join(output))
     log(f"✅ configs.txt сохранён, {len(final_list)} конфигов")
 
-    # Отладочный JSON
     debug = {
         'version': version,
         'timestamp': datetime.now().isoformat(),
