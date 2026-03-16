@@ -2,7 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v21.1 — исправленная проверка
+Catwhite Configs Collector v22 — финальная версия
+- Финские из igareck: без проверки (все)
+- Остальные: проверяем
+- Лимит: 300 всего
 """
 
 import requests
@@ -19,21 +22,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "21.1"
+VERSION_CORE = "22"
 VERSION_FILE = "version.txt"
 MAX_CONFIGS = 300
 MAX_PER_COUNTRY = 30
-MAX_FINNISH = 30
-TIMEOUT = 15
-WORKERS = 8
+TIMEOUT = 10
+WORKERS = 10
 
-# ================= СПИСОК ИСТОЧНИКОВ =================
+# ================= ИСТОЧНИКИ =================
 SOURCES = [
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt",
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt",
     "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/1.txt",
 ]
+
+# Финские будем брать только из этих источников (igareck)
+FINNISH_SOURCES = SOURCES[:3]  # первые три — от igareck
 
 # ================= ФУНКЦИИ =================
 
@@ -66,92 +71,6 @@ def extract_host(config_url: str) -> str:
     m = re.search(r'(\d+\.\d+\.\d+\.\d+)', config_url)
     if m:
         return m.group(1)
-    return None
-
-def resolve_host(hostname: str) -> str:
-    """Пробует получить IPv4, если не получается — IPv6"""
-    try:
-        return socket.gethostbyname(hostname)
-    except:
-        try:
-            addrs = socket.getaddrinfo(hostname, None, socket.AF_INET6)
-            if addrs:
-                return addrs[0][4][0]
-        except:
-            pass
-    return None
-
-def check_config(config_line: str) -> Dict[str, Any]:
-    parts = extract_config_parts(config_line)
-    url = parts['url']
-    hostname = extract_host(url)
-    if not hostname:
-        return None
-
-    port_match = re.search(r':(\d+)', url)
-    port = int(port_match.group(1)) if port_match else 443
-    
-    sni_match = re.search(r'sni=([^&]+)', url)
-    sni = sni_match.group(1) if sni_match else hostname
-
-    # Резолвим хост заранее
-    host = resolve_host(hostname)
-    if not host:
-        return None
-
-    for attempt in range(2):
-        try:
-            start = time.time()
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(TIMEOUT)
-            sock.connect((host, port))
-            
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            
-            ssl_sock = context.wrap_socket(sock, server_hostname=sni)
-            latency = (time.time() - start) * 1000
-            ssl_sock.close()
-            
-            flag = extract_flag_from_comment(parts['comment'])
-            if not is_allowed_flag(flag):
-                return None
-                
-            return {
-                'full_line': config_line,
-                'url': url,
-                'original_comment': parts['comment'],
-                'flag': flag,
-                'country': extract_country_from_comment(parts['comment']),
-                'host': host,
-                'port': port,
-                'latency': round(latency, 2),
-                'working': True
-            }
-            
-        except ssl.SSLError as e:
-            if 'WRONG_VERSION_NUMBER' in str(e):
-                latency = (time.time() - start) * 1000
-                flag = extract_flag_from_comment(parts['comment'])
-                if not is_allowed_flag(flag):
-                    return None
-                return {
-                    'full_line': config_line,
-                    'url': url,
-                    'original_comment': parts['comment'],
-                    'flag': flag,
-                    'country': extract_country_from_comment(parts['comment']),
-                    'host': host,
-                    'port': port,
-                    'latency': round(latency, 2),
-                    'working': True
-                }
-        except:
-            time.sleep(1)
-            continue
-            
     return None
 
 def extract_flag_from_comment(comment: str) -> str:
@@ -223,13 +142,85 @@ def is_valid_config(line: str) -> bool:
         return False
     return True
 
+def check_config(config_line: str) -> Dict[str, Any]:
+    """Проверяет только не-финские конфиги"""
+    parts = extract_config_parts(config_line)
+    url = parts['url']
+    hostname = extract_host(url)
+    if not hostname:
+        return None
+
+    port_match = re.search(r':(\d+)', url)
+    port = int(port_match.group(1)) if port_match else 443
+    
+    sni_match = re.search(r'sni=([^&]+)', url)
+    sni = sni_match.group(1) if sni_match else hostname
+
+    try:
+        start = time.time()
+        
+        # Пробуем резолв
+        try:
+            host = socket.gethostbyname(hostname)
+        except:
+            return None
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(TIMEOUT)
+        sock.connect((host, port))
+        
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        
+        ssl_sock = context.wrap_socket(sock, server_hostname=sni)
+        latency = (time.time() - start) * 1000
+        ssl_sock.close()
+        
+        flag = extract_flag_from_comment(parts['comment'])
+        if not is_allowed_flag(flag):
+            return None
+            
+        return {
+            'full_line': config_line,
+            'url': url,
+            'original_comment': parts['comment'],
+            'flag': flag,
+            'country': extract_country_from_comment(parts['comment']),
+            'host': host,
+            'port': port,
+            'latency': round(latency, 2),
+            'working': True
+        }
+        
+    except ssl.SSLError as e:
+        if 'WRONG_VERSION_NUMBER' in str(e):
+            latency = (time.time() - start) * 1000
+            flag = extract_flag_from_comment(parts['comment'])
+            if not is_allowed_flag(flag):
+                return None
+            return {
+                'full_line': config_line,
+                'url': url,
+                'original_comment': parts['comment'],
+                'flag': flag,
+                'country': extract_country_from_comment(parts['comment']),
+                'host': host,
+                'port': port,
+                'latency': round(latency, 2),
+                'working': True
+            }
+    except:
+        return None
+    return None
+
 def generate_number(index: int) -> str:
     return f"{index+1:03d}"
 
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    log("🚀 Старт сбора")
+    log("🚀 Старт сбора (финские без проверки, остальные — с проверкой)")
     version = get_next_version()
     log(f"📦 Версия: {version}")
 
@@ -247,61 +238,96 @@ def main():
         log("❌ Нет конфигов")
         sys.exit(1)
 
+    # Убираем дубликаты
     unique = list(set(all_configs))
     log(f"\n📊 Уникальных: {len(unique)}")
 
-    log(f"\n🔄 Проверка {len(unique)} конфигов...")
-    working = []
+    # Разделяем на финские и остальные
+    finnish_configs = []
+    other_configs = []
+    
+    for line in unique:
+        parts = extract_config_parts(line)
+        flag = extract_flag_from_comment(parts['comment'])
+        country = extract_country_from_comment(parts['comment'])
+        if country == 'Финляндия':
+            finnish_configs.append(line)
+        else:
+            other_configs.append(line)
+    
+    log(f"\n🇫🇮 Финских конфигов (без проверки): {len(finnish_configs)}")
+    log(f"🌍 Остальных конфигов (будут проверены): {len(other_configs)}")
+
+    # Финские просто добавляем (без проверки)
+    finnish_working = []
+    for line in finnish_configs:
+        parts = extract_config_parts(line)
+        flag = extract_flag_from_comment(parts['comment'])
+        if is_allowed_flag(flag):
+            finnish_working.append({
+                'full_line': line,
+                'url': parts['url'],
+                'original_comment': parts['comment'],
+                'flag': flag,
+                'country': 'Финляндия',
+                'host': extract_host(parts['url']) or 'unknown',
+                'port': 443,
+                'latency': 999,  # высокий пинг, но они всё равно будут первыми
+                'working': True
+            })
+    
+    log(f"✅ Финских добавлено: {len(finnish_working)}")
+
+    # Проверяем остальные
+    log(f"\n🔄 Проверка {len(other_configs)} остальных конфигов...")
+    other_working = []
     checked = 0
     
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
-        future_to_line = {executor.submit(check_config, line): line for line in unique}
+        future_to_line = {executor.submit(check_config, line): line for line in other_configs}
         for future in as_completed(future_to_line):
             checked += 1
             result = future.result()
             if result:
-                working.append(result)
+                other_working.append(result)
             if checked % 20 == 0:
-                log(f"   Проверено {checked}/{len(unique)}, найдено {len(working)} рабочих")
+                log(f"   Проверено {checked}/{len(other_configs)}, найдено {len(other_working)} рабочих")
 
-    log(f"\n✅ Найдено рабочих: {len(working)}")
-    
-    if not working:
-        log("❌ Нет рабочих")
-        sys.exit(1)
+    log(f"\n✅ Найдено рабочих (не-финских): {len(other_working)}")
 
-    working.sort(key=lambda x: x['latency'])
+    # Сортируем остальные по скорости
+    other_working.sort(key=lambda x: x['latency'])
 
-    finnish_all = [c for c in working if c['country'] == 'Финляндия']
-    finnish = finnish_all[:MAX_FINNISH]
-    remaining = [c for c in working if c['country'] != 'Финляндия']
-    
-    log(f"\n🇫🇮 Финских: {len(finnish_all)} всего, взято {len(finnish)}")
-    
+    # Группируем по странам
     countries = {}
-    for cfg in remaining:
+    for cfg in other_working:
         country = cfg['country']
         if country not in countries:
             countries[country] = []
         countries[country].append(cfg)
     
+    # Для каждой страны оставляем не больше MAX_PER_COUNTRY
     selected_others = []
     for country, cfgs in countries.items():
         selected = cfgs[:MAX_PER_COUNTRY]
         selected_others.extend(selected)
-        log(f"   {country}: взято {len(selected)} из {len(cfgs)}")
+        log(f"   {country}: выбрано {len(selected)} из {len(cfgs)}")
     
+    # Сортируем остальные по стране и скорости
     selected_others.sort(key=lambda x: (x['country'], x['latency']))
     
-    final_list = finnish + selected_others
+    # Финальный список: сначала все финские, потом остальные
+    final_list = finnish_working + selected_others
     
+    # Если получилось больше MAX_CONFIGS, обрезаем остальные
     if len(final_list) > MAX_CONFIGS:
-        final_list = finnish + selected_others[:MAX_CONFIGS - len(finnish)]
+        final_list = finnish_working + selected_others[:MAX_CONFIGS - len(finnish_working)]
     
     log(f"\n📊 Итого: {len(final_list)} конфигов")
-    log(f"   🇫🇮 Финских: {len(finnish)}")
-    log(f"   🌍 Других: {len(final_list) - len(finnish)}")
+    log(f"   🇫🇮 Финских: {len(finnish_working)}")
+    log(f"   🌍 Других: {len(final_list) - len(finnish_working)}")
 
+    # Генерация файла
     log("\n📝 Генерация configs.txt ...")
     output = [
         "#profile-title: 👾🌿CatwhiteVPN🌿👾",
@@ -325,19 +351,20 @@ def main():
     debug = {
         'version': version,
         'timestamp': datetime.now().isoformat(),
-        'total_checked': len(unique),
-        'working_found': len(working),
-        'best_selected': len(final_list),
-        'finnish_count': len(finnish),
-        'finnish_total': len(finnish_all),
+        'total_configs': len(unique),
+        'finnish_total': len(finnish_configs),
+        'finnish_added': len(finnish_working),
+        'other_checked': len(other_configs),
+        'other_working': len(other_working),
+        'other_selected': len(selected_others),
+        'final_count': len(final_list),
         'per_country': {c: len([x for x in final_list if x['country'] == c]) for c in set(x['country'] for x in final_list)},
-        'avg_latency': round(sum(c['latency'] for c in final_list) / len(final_list), 1) if final_list else 0,
     }
     
     with open('configs_debug.json', 'w', encoding='utf-8') as f:
         json.dump(debug, f, indent=2)
 
-    log(f"\n✨ Готово! Средний пинг: {debug['avg_latency']} ms")
+    log(f"\n✨ Готово!")
     log("=" * 70)
 
 if __name__ == "__main__":
