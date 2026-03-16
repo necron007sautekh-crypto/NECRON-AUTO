@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-Catwhite Configs Collector v29 — универсальный JSON-массив для всех клиентов
-- Берём все конфиги из WHITE-CIDR-RU-all.txt
-- Для каждого генерируем полноценный Xray-объект
-- Сохраняем как массив JSON
+Catwhite Configs Collector v31 — JSON внутри .txt
+- Файл configs.txt
+- Сначала метаданные (с #)
+- Потом JSON-массив
 """
 
 import requests
@@ -20,11 +20,10 @@ from typing import List, Dict, Any
 from urllib.parse import unquote
 
 # ================= НАСТРОЙКИ =================
-VERSION_CORE = "29"
+VERSION_CORE = "31"
 VERSION_FILE = "version.txt"
 SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
 
-# DNS сервера (как в примере)
 DNS_SERVERS = [
     "https+local://1.1.1.1/dns-query",
     "https+local://8.8.8.8/dns-query",
@@ -50,7 +49,6 @@ def get_next_version() -> str:
     return f"{VERSION_CORE}.{next_ver}"
 
 def parse_vless_url(url: str) -> Dict[str, Any]:
-    """Парсит vless:// URL в словарь с параметрами"""
     result = {
         'uuid': None,
         'host': None,
@@ -135,142 +133,72 @@ def extract_country_from_comment(comment: str) -> str:
     }
     return country_map.get(flag, 'Anycast')
 
-def create_full_config(vless_url: str, index: int, total: int) -> Dict[str, Any]:
-    """Создаёт полноценный Xray-конфиг (как в примере)"""
+def create_full_config(vless_url: str, index: int) -> Dict[str, Any]:
     parsed = parse_vless_url(vless_url)
     flag = extract_flag_from_comment(parsed['comment'])
     country = extract_country_from_comment(parsed['comment'])
     
-    # Номер и название
     num = f"{index+1:03d}"
     remark = f"{flag} {num} {country} | 💠 | от catler"
     
-    # Создаём outbounds (10 штук, как в примере)
-    outbounds = []
-    for i in range(10):
-        tag = f"s{i+1}"
-        if i == 0:
-            # Первый outbound — сам конфиг
-            outbound = {
-                "tag": tag,
-                "protocol": "vless",
-                "settings": {
-                    "vnext": [{
-                        "address": parsed['host'],
-                        "port": parsed['port'],
-                        "users": [{
-                            "id": parsed['uuid'],
-                            "flow": parsed['params'].get('flow', ''),
-                            "encryption": parsed['params'].get('encryption', 'none')
-                        }]
+    outbounds = [
+        {
+            "tag": "s1",
+            "protocol": "vless",
+            "settings": {
+                "vnext": [{
+                    "address": parsed['host'],
+                    "port": parsed['port'],
+                    "users": [{
+                        "id": parsed['uuid'],
+                        "flow": parsed['params'].get('flow', ''),
+                        "encryption": parsed['params'].get('encryption', 'none')
                     }]
-                },
-                "streamSettings": {
-                    "network": parsed['params'].get('type', 'tcp'),
-                    "security": parsed['params'].get('security', 'none'),
-                }
-            }
-            # Добавляем reality если есть
-            if parsed['params'].get('security') == 'reality':
-                outbound['streamSettings']['realitySettings'] = {
-                    "publicKey": parsed['params'].get('pbk', ''),
-                    "shortId": parsed['params'].get('sid', ''),
-                    "spiderX": parsed['params'].get('spx', ''),
-                    "serverName": parsed['params'].get('sni', parsed['host']),
-                    "fingerprint": parsed['params'].get('fp', 'chrome'),
-                    "show": False
-                }
-            if parsed['params'].get('security') == 'tls':
-                outbound['streamSettings']['tlsSettings'] = {
-                    "serverName": parsed['params'].get('sni', parsed['host']),
-                    "fingerprint": parsed['params'].get('fp', 'chrome')
-                }
-        else:
-            # Остальные outbounds — dummy (можно добавить реальные позже)
-            outbound = {
-                "tag": tag,
-                "protocol": "vless",
-                "settings": {
-                    "vnext": [{
-                        "address": parsed['host'],
-                        "port": parsed['port'],
-                        "users": [{
-                            "id": parsed['uuid'],
-                            "flow": parsed['params'].get('flow', ''),
-                            "encryption": parsed['params'].get('encryption', 'none')
-                        }]
-                    }]
-                },
-                "streamSettings": {
-                    "network": parsed['params'].get('type', 'tcp'),
-                    "security": parsed['params'].get('security', 'none'),
-                }
-            }
-            # Копируем reality если есть
-            if parsed['params'].get('security') == 'reality':
-                outbound['streamSettings']['realitySettings'] = {
-                    "publicKey": parsed['params'].get('pbk', ''),
-                    "shortId": parsed['params'].get('sid', ''),
-                    "spiderX": parsed['params'].get('spx', ''),
-                    "serverName": parsed['params'].get('sni', parsed['host']),
-                    "fingerprint": parsed['params'].get('fp', 'chrome'),
-                    "show": False
-                }
-            if parsed['params'].get('security') == 'tls':
-                outbound['streamSettings']['tlsSettings'] = {
-                    "serverName": parsed['params'].get('sni', parsed['host']),
-                    "fingerprint": parsed['params'].get('fp', 'chrome')
-                }
-        outbounds.append(outbound)
-    
-    # Добавляем direct и blackhole
-    outbounds.append({"protocol": "freedom", "tag": "direct"})
-    outbounds.append({"protocol": "blackhole", "tag": "block"})
-    
-    # Собираем полный конфиг
-    config = {
-        "dns": {
-            "queryStrategy": "UseIPv4",
-            "servers": DNS_SERVERS
-        },
-        "inbounds": [
-            {
-                "listen": "127.0.0.1",
-                "port": 10808,
-                "protocol": "socks",
-                "settings": {"udp": True},
-                "tag": "socks"
+                }]
             },
-            {
-                "listen": "127.0.0.1",
-                "port": 10809,
-                "protocol": "http",
-                "tag": "http"
+            "streamSettings": {
+                "network": parsed['params'].get('type', 'tcp'),
+                "security": parsed['params'].get('security', 'none'),
             }
+        },
+        {"protocol": "freedom", "tag": "direct"},
+        {"protocol": "blackhole", "tag": "block"}
+    ]
+    
+    if parsed['params'].get('security') == 'reality':
+        outbounds[0]['streamSettings']['realitySettings'] = {
+            "publicKey": parsed['params'].get('pbk', ''),
+            "shortId": parsed['params'].get('sid', ''),
+            "spiderX": parsed['params'].get('spx', ''),
+            "serverName": parsed['params'].get('sni', parsed['host']),
+            "fingerprint": parsed['params'].get('fp', 'chrome'),
+            "show": False
+        }
+    if parsed['params'].get('security') == 'tls':
+        outbounds[0]['streamSettings']['tlsSettings'] = {
+            "serverName": parsed['params'].get('sni', parsed['host']),
+            "fingerprint": parsed['params'].get('fp', 'chrome')
+        }
+    
+    return {
+        "dns": {"queryStrategy": "UseIPv4", "servers": DNS_SERVERS},
+        "inbounds": [
+            {"listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": {"udp": True}, "tag": "socks"},
+            {"listen": "127.0.0.1", "port": 10809, "protocol": "http", "tag": "http"}
         ],
         "meta": None,
         "outbounds": outbounds,
         "remarks": remark,
         "burstObservatory": {
-            "pingConfig": {
-                "destination": "https://www.google.com/generate_204",
-                "interval": "1s",
-                "sampling": 2,
-                "timeout": "3s"
-            },
-            "subjectSelector": [f"s{i+1}" for i in range(10)]
+            "pingConfig": {"destination": "https://www.google.com/generate_204", "interval": "1s", "sampling": 2, "timeout": "3s"},
+            "subjectSelector": ["s1"]
         },
         "routing": {
             "balancers": [{
                 "fallbackTag": "s1",
-                "selector": [f"s{i+1}" for i in range(10)],
+                "selector": ["s1"],
                 "strategy": {
-                    "settings": {
-                        "baselines": ["2s"],
-                        "expected": 1,
-                        "maxRTT": "3s",
-                        "tolerance": 0.3
-                    },
+                    "settings": {"baselines": ["2s"], "expected": 1, "maxRTT": "3s", "tolerance": 0.3},
                     "type": "leastLoad"
                 },
                 "tag": "auto_bal"
@@ -282,8 +210,6 @@ def create_full_config(vless_url: str, index: int, total: int) -> Dict[str, Any]
             ]
         }
     }
-    
-    return config
 
 def fetch_configs() -> List[str]:
     try:
@@ -301,7 +227,7 @@ def fetch_configs() -> List[str]:
 # ================= ОСНОВНАЯ ЛОГИКА =================
 
 def main():
-    log("🚀 Catwhite Configs Collector v29 — универсальный JSON")
+    log("🚀 Catwhite Configs Collector v31 — JSON внутри .txt")
     version = get_next_version()
     log(f"📦 Версия: {version}")
 
@@ -323,7 +249,7 @@ def main():
             failed += 1
             continue
         try:
-            config = create_full_config(line, idx, len(configs))
+            config = create_full_config(line, idx)
             json_configs.append(config)
             country = extract_country_from_comment(line)
             if country == 'Финляндия':
@@ -336,9 +262,20 @@ def main():
             log(f"⚠️ Ошибка строки {idx+1}: {e}")
             failed += 1
 
-    # Сохраняем JSON
-    with open('configs.json', 'w', encoding='utf-8') as f:
-        json.dump(json_configs, f, ensure_ascii=False, indent=2)
+    # Формируем .txt файл с метаданными и JSON
+    output_lines = [
+        f"#profile-title: 🌐🌿CatwhiteVPN🌿🌐",
+        f"#announce: ⚡️Тгк @catlergememe версия: {version}⚡️",
+        f"#support-url: https://t.me/catlergememe/856",
+        f"#profile-web-page-url: https://twinkalex1470-crypto.github.io/Catsite/",
+        f"#profile-update-interval: 5",
+        "",
+        json.dumps(json_configs, ensure_ascii=False, indent=None)
+    ]
+
+    output_file = 'configs.txt'
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(output_lines))
 
     log(f"\n📊 Статистика:")
     log(f"   • Конвертировано: {len(json_configs)}")
@@ -346,9 +283,8 @@ def main():
     log(f"   • 🇫🇮 Финских: {finnish_count}")
     log(f"   • 🌍 Других: {other_count}")
     log(f"   • 🌐 Anycast: {anycast_count}")
-    log(f"✅ configs.json сохранён")
+    log(f"✅ {output_file} сохранён")
 
-    # debug
     with open('debug.json', 'w') as f:
         json.dump({
             'version': version,
@@ -359,7 +295,7 @@ def main():
         }, f, indent=2)
 
     log(f"\n✨ Готово! Ссылка:")
-    log(f"https://twinkalex1470-crypto.github.io/CatwhiteAUTO/configs.json")
+    log(f"https://twinkalex1470-crypto.github.io/CatwhiteAUTO/configs.txt")
     log("=" * 70)
 
 if __name__ == "__main__":
