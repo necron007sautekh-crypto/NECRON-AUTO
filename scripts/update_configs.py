@@ -7,19 +7,28 @@ Catwhite Configs Collector — простая TXT-подписка
 - Переименовываем их в нужный формат
 - Добавляем шапку с названием и ссылками
 - Сохраняем как configs.txt
+- Автоматически загружаем на GitHub
 """
 
 import requests
 import os
 import re
 import sys
+import base64
 from datetime import datetime
 from urllib.parse import unquote
+import json
 
 # ================= НАСТРОЙКИ =================
 VERSION_CORE = "1"
 VERSION_FILE = "version.txt"
 SOURCE = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
+
+# GitHub настройки - нужно заполнить своими данными!
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "YOUR_GITHUB_TOKEN")  # Использовать секреты GitHub Actions
+GITHUB_REPO = "twinkalex1470-crypto/CatwhiteAUTO"  # Ваш репозиторий
+GITHUB_BRANCH = "main"  # Ветка
+GITHUB_FILE_PATH = "configs.txt"  # Путь к файлу в репозитории
 
 # ================= ФУНКЦИИ =================
 
@@ -101,6 +110,56 @@ def process_config_line(line: str, index: int) -> str:
 
     return f"{url_part}#{flag} {num} {country} | 💠 | от catler"
 
+def upload_to_github(content, version):
+    """Загружает файл на GitHub"""
+    if GITHUB_TOKEN == "YOUR_GITHUB_TOKEN":
+        log("⚠️ GitHub токен не настроен, пропускаем загрузку")
+        return False
+    
+    try:
+        # Кодируем содержимое в base64
+        content_bytes = content.encode('utf-8')
+        content_base64 = base64.b64encode(content_bytes).decode('utf-8')
+        
+        # Сначала проверяем, существует ли файл
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = {
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        # Пытаемся получить текущий файл (чтобы узнать sha)
+        response = requests.get(url, headers=headers)
+        sha = None
+        if response.status_code == 200:
+            sha = response.json()["sha"]
+            log(f"📁 Файл найден, sha: {sha[:7]}...")
+        
+        # Подготавливаем данные для коммита
+        data = {
+            "message": f"Обновление конфигов v{version}",
+            "content": content_base64,
+            "branch": GITHUB_BRANCH
+        }
+        
+        if sha:
+            data["sha"] = sha
+        
+        # Загружаем файл
+        response = requests.put(url, headers=headers, json=data)
+        
+        if response.status_code in [200, 201]:
+            log(f"✅ Файл успешно загружен на GitHub!")
+            return True
+        else:
+            log(f"❌ Ошибка загрузки на GitHub: {response.status_code}")
+            log(f"Ответ: {response.text}")
+            return False
+            
+    except Exception as e:
+        log(f"❌ Ошибка при загрузке на GitHub: {e}")
+        return False
+
 def fetch_configs():
     try:
         log(f"📡 Загрузка {SOURCE[:80]}...")
@@ -163,19 +222,24 @@ def main():
         except Exception as e:
             log(f"⚠️ Ошибка строки {idx+1}: {e}")
 
-    # Сохраняем файл
+    # Сохраняем файл локально
+    output_content = '\n'.join(output_lines)
     with open('configs.txt', 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
+        f.write(output_content)
 
     log(f"\n📊 Статистика:")
     log(f"   • Всего конфигов: {processed}")
     log(f"   • 🇫🇮 Финских: {finnish_count}")
     log(f"   • 🌍 Других стран: {other_count}")
     log(f"   • 🌐 Anycast: {anycast_count}")
-    log(f"✅ configs.txt сохранён")
+    log(f"✅ configs.txt сохранён локально")
+
+    # Загружаем на GitHub
+    upload_to_github(output_content, version)
 
     log(f"\n✨ Готово! Ссылка:")
-    log(f"https://twinkalex1470-crypto.github.io/CatwhiteAUTO/configs.txt")
+    log(f"https://{GITHUB_REPO.replace('/', '.github.io/')}/{GITHUB_FILE_PATH}")
+    log(f"Или: https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_FILE_PATH}")
     log("=" * 70)
 
 if __name__ == "__main__":
