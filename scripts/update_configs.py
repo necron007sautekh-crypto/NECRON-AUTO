@@ -3,8 +3,10 @@
 
 import requests
 import os
+import re
 import sys
 from datetime import datetime
+from urllib.parse import unquote
 
 # ========== НАСТРОЙКИ ==========
 SOURCE_URL = "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt"
@@ -20,7 +22,25 @@ COUNTRIES = {
     '🇳🇴': 'Норвегия', '🇦🇪': 'ОАЭ', '🇵🇱': 'Польша', '🇷🇺': 'Россия',
     '🇺🇸': 'США', '🇹🇷': 'Турция', '🇫🇮': 'Финляндия', '🇫🇷': 'Франция',
     '🇨🇿': 'Чехия', '🇸🇪': 'Швеция', '🇪🇪': 'Эстония', '🇯🇵': 'Япония',
-    '🌐': 'Anycast'
+    '🇪🇺': 'Европа', '🌐': 'Anycast'
+}
+
+# ========== СООТВЕТСТВИЕ URL-КОДИРОВОК ФЛАГАМ ==========
+# Некоторые распространённые флаги в URL-кодировке
+FLAG_PATTERNS = {
+    '%F0%9F%87%AB%F0%9F%87%B7': '🇫🇷',  # Франция
+    '%F0%9F%87%A9%F0%9F%87%AA': '🇩🇪',  # Германия
+    '%F0%9F%87%AB%F0%9F%87%AE': '🇫🇮',  # Финляндия
+    '%F0%9F%87%AA%F0%9F%87%AA': '🇪🇪',  # Эстония
+    '%F0%9F%87%A7%F0%9F%87%AA': '🇧🇪',  # Бельгия
+    '%F0%9F%87%B1%F0%9F%87%BB': '🇱🇻',  # Латвия
+    '%F0%9F%87%B3%F0%9F%87%B4': '🇳🇴',  # Норвегия
+    '%F0%9F%87%B5%F0%9F%87%B1': '🇵🇱',  # Польша
+    '%F0%9F%87%B3%F0%9F%87%B1': '🇳🇱',  # Нидерланды
+    '%F0%9F%87%AC%F0%9F%87%A7': '🇬🇧',  # Великобритания
+    '%F0%9F%87%BA%F0%9F%87%B8': '🇺🇸',  # США
+    '%F0%9F%87%B7%F0%9F%87%BA': '🇷🇺',  # Россия
+    '%F0%9F%87%A6%F0%9F%87%B9': '🇦🇹',  # Австрия
 }
 
 def log(msg):
@@ -44,12 +64,23 @@ def get_version():
     
     return f"22.1.{next_ver}"
 
-def find_flag(text):
-    """Найти флаг в тексте"""
-    flags = list(COUNTRIES.keys())
-    for flag in flags:
-        if flag in text:
+def extract_flag_from_comment(comment):
+    """Извлекает флаг из закодированного комментария"""
+    # Сначала пробуем найти по URL-кодировкам
+    for encoded, flag in FLAG_PATTERNS.items():
+        if encoded in comment:
             return flag
+    
+    # Если не нашли, пробуем декодировать и искать эмодзи
+    try:
+        decoded = unquote(comment)
+        # Ищем любой флаг из нашего словаря
+        for flag in COUNTRIES.keys():
+            if flag in decoded:
+                return flag
+    except:
+        pass
+    
     return '🌐'
 
 def main():
@@ -58,7 +89,6 @@ def main():
     
     # Проверяем текущую директорию
     log(f"Текущая папка: {os.getcwd()}")
-    log(f"Файлы здесь: {os.listdir('.')}")
     
     # Версия
     version = get_version()
@@ -76,6 +106,12 @@ def main():
         
         lines = r.text.strip().split('\n')
         log(f"Скачано строк: {len(lines)}")
+        
+        # Покажем первые несколько строк для отладки
+        log("Первые 5 строк источника:")
+        for i, line in enumerate(lines[:5]):
+            if line.strip():
+                log(f"  {i+1}: {line[:100]}...")
         
     except Exception as e:
         log(f"ОШИБКА скачивания: {e}")
@@ -95,6 +131,7 @@ def main():
     # Обрабатываем строки
     configs = []
     skipped = 0
+    flag_stats = {}
     
     for i, line in enumerate(lines):
         line = line.strip()
@@ -104,7 +141,7 @@ def main():
             continue
         
         # Проверяем что это конфиг
-        if line.startswith(('vless://', 'vmess://', 'trojan://', 'hysteria://', 'ss://')):
+        if line.startswith(('vless://', 'vmess://', 'trojan://', 'hysteria2://', 'ss://')):
             try:
                 # Разделяем URL и комментарий
                 if '#' in line:
@@ -112,9 +149,12 @@ def main():
                 else:
                     url, comment = line, ''
                 
-                # Ищем флаг в комментарии
-                flag = find_flag(comment)
+                # Извлекаем флаг из комментария
+                flag = extract_flag_from_comment(comment)
                 country = COUNTRIES.get(flag, 'Anycast')
+                
+                # Собираем статистику по флагам
+                flag_stats[flag] = flag_stats.get(flag, 0) + 1
                 
                 # Собираем новую строку
                 new_line = f"{url}#{flag} {country} |💠| от катлер"
@@ -130,6 +170,12 @@ def main():
     log(f"- Конфигов: {len(configs)}")
     log(f"- Пропущено: {skipped}")
     
+    # Статистика по странам
+    log("\nСтатистика по странам:")
+    for flag, count in sorted(flag_stats.items(), key=lambda x: -x[1]):
+        country = COUNTRIES.get(flag, 'Anycast')
+        log(f"  {flag} {country}: {count}")
+    
     if len(configs) == 0:
         log("ОШИБКА: Нет конфигов!")
         return
@@ -139,14 +185,16 @@ def main():
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write('\n'.join(header + configs))
         
-        log(f"✅ Файл сохранён: {OUTPUT_FILE}")
+        log(f"\n✅ Файл сохранён: {OUTPUT_FILE}")
         log(f"Размер: {os.path.getsize(OUTPUT_FILE)} байт")
         
         # Показываем первые 3 строки для проверки
         log("\nПЕРВЫЕ 3 КОНФИГА:")
         for cfg in configs[:3]:
-            short = cfg[:100] + "..." if len(cfg) > 100 else cfg
-            log(f"  {short}")
+            if '#' in cfg:
+                url_part = cfg.split('#')[0][:50] + "..."
+                name_part = cfg.split('#')[1]
+                log(f"  {url_part}#{name_part}")
             
     except Exception as e:
         log(f"ОШИБКА сохранения: {e}")
