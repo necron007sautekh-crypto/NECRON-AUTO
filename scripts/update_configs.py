@@ -148,10 +148,10 @@ def main():
             # Если строка не похожа на конфиг, пропускаем
             skipped += 1
     
-    # Формируем полный вывод
+    # Формируем полный вывод (ПОЛНОСТЬЮ ПЕРЕЗАПИСЫВАЕМ файл)
     output_lines = header + processed_configs
     
-    # Сохраняем в файл
+    # Сохраняем в файл (режим 'w' гарантирует полную перезапись)
     try:
         with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
             f.write('\n'.join(output_lines))
@@ -160,15 +160,16 @@ def main():
         log(f"   • Обработано конфигов: {len(processed_configs)}")
         log(f"   • Пропущено строк: {skipped}")
         log(f"   • Версия: {version}")
-        log(f"\n✅ Файл {OUTPUT_FILE} успешно сохранён")
+        log(f"\n✅ Файл {OUTPUT_FILE} полностью перезаписан новыми конфигами")
         
         # Показываем первые 3 конфига для примера
         if processed_configs:
-            log("\n📝 Пример первых 3 конфигов:")
-            for sample in processed_configs[:3]:
+            log("\n📝 Пример первых 3 конфигов из нового файла:")
+            for idx, sample in enumerate(processed_configs[:3], 1):
                 # Обрезаем длинные строки для читаемости
-                short = sample[:80] + "..." if len(sample) > 80 else sample
-                log(f"   • {short}")
+                url_part = sample.split('#')[0][:50] + "..."
+                name_part = sample.split('#')[1] if '#' in sample else "без названия"
+                log(f"   {idx}. {url_part}#{name_part}")
                 
     except Exception as e:
         log(f"❌ Ошибка сохранения файла: {e}")
