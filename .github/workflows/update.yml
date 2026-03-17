@@ -2,8 +2,8 @@ name: Update Catwhite Configs
 
 on:
   schedule:
-    - cron: '0 */5 * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'  # Каждый час
+  workflow_dispatch:      # Ручной запуск
 
 permissions:
   contents: write
@@ -30,7 +30,7 @@ jobs:
       - name: Run config collector
         run: |
           python scripts/update_configs.py
-          echo "=== СОДЕРЖИМОЕ НОВОГО configs.txt ==="
+          echo "=== ПЕРВЫЕ 20 СТРОК НОВОГО configs.txt ==="
           head -n 20 configs.txt
           echo "=== КОНЕЦ ==="
       
@@ -38,12 +38,12 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add configs.txt version.txt -f  # Принудительно добавляем
-          git status  # Показываем статус
+          git add configs.txt version.txt -f
+          git status
           if git diff --staged --quiet; then
             echo "❌ НЕТ ИЗМЕНЕНИЙ для коммита"
           else
-            git commit -m "🔄 Принудительное обновление конфигов v$(cat version.txt)"
+            git commit -m "🔄 Ежечасное обновление конфигов v$(cat version.txt)"
             git push
             echo "✅ Изменения запушены"
           fi
