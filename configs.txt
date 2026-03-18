@@ -1,6 +1,6 @@
 #profile-title: 👾🌿CatwhiteVPN🌿👾
 #profile-update-interval: 1
-#announce: ⚡️Тгк @catlergememe версия: 22.1.42⚡️
+#announce: ⚡️Тгк @catlergememe версия: 22.1.43⚡️
 #support-url: https://t.me/catlergememe/856
 #profile-web-page-url: https://twinkalex1470-crypto.github.io/Catsite/
 #hide-settings: 1
