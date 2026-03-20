@@ -1,4 +1,4 @@
-name: Update NECRON_0.1 Configs
+name: Update NECRON-AUTO Configs
 
 on:
   schedule:
