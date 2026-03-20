@@ -37,7 +37,7 @@ def fetch_and_process_source(url, source_name):
                     country = COUNTRIES.get(flag, 'Anycast')
                     
                     # ← Вот здесь меняем подпись
-                    new_line = f"{url_part}#{flag} {country} | NECRON_0.5"   # или любой вариант выше
+                    new_line = f"{url_part}#{flag} {country} | NECRON-AUTO"   # или любой вариант выше
                     
                     configs.append(new_line)
                     
