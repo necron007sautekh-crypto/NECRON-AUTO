@@ -123,7 +123,7 @@ def fetch_and_process_source(url, source_name):
                     flag = extract_flag_from_comment(comment)
                     country = COUNTRIES.get(flag, 'Anycast')
                     
-                    new_line = f"{url_part}#{flag} {country} |💠| от катлер"
+                    new_line = f"{url_part}#{flag} {country} NECRON"
                     configs.append(new_line)
                     
                 except Exception as e:
