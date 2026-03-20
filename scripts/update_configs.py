@@ -9,8 +9,8 @@ from urllib.parse import unquote
 
 # ========== НАСТРОЙКИ ==========
 SOURCES = [
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/WHITE-CIDR-RU-all.txt",
-    "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Vless-Reality-White-Lists-Rus-Mobile.txt"
+    "https://raw.githubusercontent.com/necron007sautekh-crypto/NECRON_0.1/refs/heads/main/NECRON_0.5",
+    "https://raw.githubusercontent.com/necron007sautekh-crypto/IMPERI_0.0/refs/heads/main/IMPERI_0.1"
 ]
 OUTPUT_FILE = "configs.txt"
 VERSION_FILE = "version.txt"
