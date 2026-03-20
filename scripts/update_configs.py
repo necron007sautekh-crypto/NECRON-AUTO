@@ -169,11 +169,8 @@ def main():
     
     # Заголовок
     header = [
-        "#profile-title: 👾🌿CatwhiteVPN🌿👾",
+        "#profile-title: NECRON-AUTO",
         "#profile-update-interval: 1",
-        f"#announce: ⚡️Тгк @catlergememe версия: {version}⚡️",
-        "#support-url: https://t.me/catlergememe/856",
-        "#profile-web-page-url: https://twinkalex1470-crypto.github.io/Catsite/",
         "#hide-settings: 1",
         ""
     ]
