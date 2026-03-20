@@ -1,6 +1,6 @@
-# 🐱 Catwhite Configs — Автоматический сборщик VPN-конфигов
+# NECCRON-AUTO — Автоматический сборщик VPN-конфигов
 
-[![Update Configs](https://github.com/твой-ник/catwhite-configs/actions/workflows/update.yml/badge.svg)](https://github.com/твой-ник/catwhite-configs/actions/workflows/update.yml)
+[![Update Configs](https://github.com/твой-ник/catwhite-configs/actions/workflows/update.yml/badge.svg)](https://github.com/твой-ник/necron-auto-configs/actions/workflows/update.yml)
 
 Автоматический сбор и проверка VPN-конфигов (VLESS, VMess, Trojan, Shadowsocks) для проектов **CatwhiteVPN** и **GlashaVPN**.
 
