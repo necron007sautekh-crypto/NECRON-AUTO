@@ -121,7 +121,7 @@ def fetch_and_process_source(url, source_name):
                         url_part, comment = line, ''
                     
                     flag = extract_flag_from_comment(comment)
-                    country = COUNTRIES.get(flag, 'Anycast')
+                    country = COUNTRIES.get(flag, 'Ncron')
                     
                     new_line = f"{url_part}#{flag} {country} NECRON"
                     configs.append(new_line)
@@ -138,7 +138,7 @@ def fetch_and_process_source(url, source_name):
 
 def main():
     log("=" * 50)
-    log("🚀 CatwhiteVPN - Сбор из двух источников")
+    log("🚀 NecronVPN - Сбор из двух источников")
     
     version = get_version()
     log(f"📦 Версия: {version}")
